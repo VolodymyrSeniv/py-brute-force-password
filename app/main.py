@@ -1,9 +1,15 @@
+# authorized_bruteforce_demo.py
+# Educational/demo code for authorized coursework only.
+# Scans numeric 8-digit candidates "00000000".."99999999" looking for matches in TARGET_HASHES.
+# Splits the search space into disjoint chunks and uses ProcessPoolExecutor to parallelize.
+
 import time
 from hashlib import sha256
-from concurrent.futures import ProcessPoolExecutor, wait
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
+from typing import Dict, Set, Tuple, List
 
-
+# Example target hashes (replace with hashes you generated for the exercise)
 PASSWORDS_TO_BRUTE_FORCE = [
     "b4061a4bcfe1a2cbf78286f3fab2fb578266d1bd16c414c650c5ac04dfc696e1",
     "cf0b0cfc90d8b4be14e00114827494ed5522e9aa1c7e6960515b58626cad0b44",
@@ -17,28 +23,68 @@ PASSWORDS_TO_BRUTE_FORCE = [
     "e5f3ff26aa8075ce7513552a9af1882b4fbc2a47a3525000f6eb887ab9622207",
 ]
 
-
 def sha256_hash_str(to_hash: str) -> str:
     return sha256(to_hash.encode("utf-8")).hexdigest()
 
+def scan_range(start: int, end: int, targets: Set[str]) -> Dict[str, str]:
+    found: Dict[str, str] = {}
+    for i in range(start, end):
+        candidate = f"{i:08d}"
+        h = sha256_hash_str(candidate)
+        if h in targets:
+            found[h] = candidate
+    return found
 
-def brute_force_password() -> None:
-    result = []
-    with ProcessPoolExecutor(multiprocessing.cpu_count() - 1) as executor:
-        for code in PASSWORDS_TO_BRUTE_FORCE:
-            result.append(executor.submit(print_passwords, code))
-        
-    wait(result)
+def chunk_ranges(total: int, chunk_size: int) -> List[Tuple[int, int]]:
+    """Return list of (start, end) ranges covering [0, total) in chunk_size increments."""
+    ranges = []
+    for start in range(0, total, chunk_size):
+        end = min(start + chunk_size, total)
+        ranges.append((start, end))
+    return ranges
 
+def brute_force_password(target_hashes: List[str],
+                         total_space: int = 100_000_000,
+                         chunk_size: int = 1_000_000):
+    assert total_space >= 1
+    targets = set(target_hashes)
+    found: Dict[str, str] = {}
 
-def print_passwords(password_hash: list) -> None:
-    password = sha256_hash_str(password_hash)
-    print(password)
+    cpu_count = max(1, multiprocessing.cpu_count() - 1)
+    ranges = chunk_ranges(total_space, chunk_size)
 
+    print(f"Workers: {cpu_count}, total chunks: {len(ranges)}, chunk_size: {chunk_size}")
+    with ProcessPoolExecutor(max_workers=cpu_count) as ex:
+        futures = {ex.submit(scan_range, start, end, targets): (start, end) for start, end in ranges}
+        try:
+            for fut in as_completed(futures):
+                chunk_start, chunk_end = futures[fut]
+                result = fut.result()
+                if result:
+                    for h, plain in result.items():
+                        if h not in found:
+                            found[h] = plain
+                            print(f"FOUND in chunk [{chunk_start},{chunk_end}): {plain} -> {h}")
+                if len(found) >= len(targets):
+                    print("All targets found; attempting to cancel remaining tasks...")
+                    for other in futures:
+                        if not other.done():
+                            other.cancel()
+                    break
+        except KeyboardInterrupt:
+            print("Interrupted by user; shutting down executor.")
+
+    print(f"Elapsed {end_time - start_time:.2f}s")
+    print(f"Found {len(found)}/{len(targets)} targets.")
+    for h in target_hashes:
+        print(f"{h} -> {found.get(h, '<NOT FOUND>')}")
+    return found
 
 if __name__ == "__main__":
+    TEST_TOTAL = 100_000_000
+    TEST_CHUNK = 1_000_000
     start_time = time.perf_counter()
-    brute_force_password()
+    brute_force_password(PASSWORDS_TO_BRUTE_FORCE, total_space=TEST_TOTAL, chunk_size=TEST_CHUNK)
     end_time = time.perf_counter()
 
     print("Elapsed:", end_time - start_time)
