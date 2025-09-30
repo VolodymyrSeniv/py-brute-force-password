@@ -36,7 +36,6 @@ def scan_range(start: int, end: int, targets: Set[str]) -> Dict[str, str]:
     return found
 
 def chunk_ranges(total: int, chunk_size: int) -> List[Tuple[int, int]]:
-    """Return list of (start, end) ranges covering [0, total) in chunk_size increments."""
     ranges = []
     for start in range(0, total, chunk_size):
         end = min(start + chunk_size, total)
@@ -64,27 +63,19 @@ def brute_force_password(target_hashes: List[str],
                     for h, plain in result.items():
                         if h not in found:
                             found[h] = plain
-                            print(f"FOUND in chunk [{chunk_start},{chunk_end}): {plain} -> {h}")
                 if len(found) >= len(targets):
                     print("All targets found; attempting to cancel remaining tasks...")
-                    for other in futures:
-                        if not other.done():
-                            other.cancel()
-                    break
+                    return found
         except KeyboardInterrupt:
             print("Interrupted by user; shutting down executor.")
 
-    print(f"Elapsed {end_time - start_time:.2f}s")
-    print(f"Found {len(found)}/{len(targets)} targets.")
-    for h in target_hashes:
-        print(f"{h} -> {found.get(h, '<NOT FOUND>')}")
-    return found
-
 if __name__ == "__main__":
     TEST_TOTAL = 100_000_000
-    TEST_CHUNK = 1_000_000
+    TEST_CHUNK = 1_000_00
     start_time = time.perf_counter()
-    brute_force_password(PASSWORDS_TO_BRUTE_FORCE, total_space=TEST_TOTAL, chunk_size=TEST_CHUNK)
+    found = brute_force_password(PASSWORDS_TO_BRUTE_FORCE, total_space=TEST_TOTAL, chunk_size=TEST_CHUNK)
     end_time = time.perf_counter()
+    for key in found.keys():
+        print(f"Hash: {key}. Password {found[key]}")
 
     print("Elapsed:", end_time - start_time)
